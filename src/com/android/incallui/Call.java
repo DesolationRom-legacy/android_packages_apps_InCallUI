@@ -478,7 +478,6 @@ public final class Call {
                 PhoneCapabilities.toString(mTelecommCall.getDetails().getCallCapabilities()),
                 mChildCallIds,
                 getParentId(),
-                mTelecommCall.getDetails().getVideoState(), mIsActiveSub,
-                mTelecommCall.getDetails().getCallSubstate(), mSessionModificationState);
+                mTelecommCall.getDetails().getVideoState(), mIsActiveSub);
     }
 }

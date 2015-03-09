@@ -564,8 +564,6 @@ public class CallCardFragment extends BaseFragment<CallCardPresenter, CallCardPr
         showCallTypeLabel(isSipCall, isForwarded);
 
         setDrawableToImageView(mPhoto, photo);
-
-        setDetailedInfo(nickName, organization, position, city);
     }
 
     @Override
