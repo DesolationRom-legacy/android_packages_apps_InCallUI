@@ -21,13 +21,16 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ActivityNotFoundException;
+import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.os.Bundle;
+import android.preference.PreferenceManager;
 import android.telecom.DisconnectCause;
 import android.telecom.PhoneAccount;
 import android.telecom.PhoneCapabilities;
 import android.telecom.Phone;
 import android.telecom.PhoneAccountHandle;
+import android.telecom.TelecomManager;
 import android.telecom.VideoProfile;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
@@ -57,7 +60,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * that want to listen in on the in-call state changes.
  * TODO: This class has become more of a state machine at this point.  Consider renaming.
  */
-public class InCallPresenter implements CallList.Listener, InCallPhoneListener {
+public class InCallPresenter implements CallList.Listener,
+       InCallPhoneListener, AccelerometerListener.ChangeListener {
 
     private static final String EXTRA_FIRST_TIME_SHOWN =
             "com.android.incallui.intent.extra.FIRST_TIME_SHOWN";
@@ -90,6 +94,7 @@ public class InCallPresenter implements CallList.Listener, InCallPhoneListener {
     private InCallActivity mInCallActivity;
     private InCallState mInCallState = InCallState.NO_CALLS;
     private ProximitySensor mProximitySensor;
+    private AccelerometerListener mAccelerometerListener;
     private boolean mServiceConnected = false;
     private boolean mAccountSelectionCancelled = false;
     private InCallCameraManager mInCallCameraManager = null;
@@ -165,6 +170,7 @@ public class InCallPresenter implements CallList.Listener, InCallPhoneListener {
 
     private Phone mPhone;
     private int mLastDisconnectCause = DisconnectCause.ERROR;
+    private TelecomManager mTelecomManager;
 
     public static synchronized InCallPresenter getInstance() {
         if (sInCallPresenter == null) {
@@ -222,6 +228,8 @@ public class InCallPresenter implements CallList.Listener, InCallPhoneListener {
         mPowerManager = (PowerManager) mContext.getSystemService(Context.POWER_SERVICE);
         mWakeLock = mPowerManager.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK |
                 PowerManager.ACQUIRE_CAUSES_WAKEUP, "InCallPresenter");
+
+        mAccelerometerListener = new AccelerometerListener(context, this);
 
         mCallList = callList;
 
@@ -370,6 +378,10 @@ public class InCallPresenter implements CallList.Listener, InCallPhoneListener {
         newState = startOrFinishUi(newState);
         Log.d(this, "onCallListChange newState changed to " + newState);
 
+        if (!newState.isIncoming() && mAccelerometerListener != null) {
+            mAccelerometerListener.enable(false);
+        }
+
         // Set the new state before announcing it to the world
         Log.i(this, "Phone switching state: " + oldState + " -> " + newState);
         mInCallState = newState;
@@ -403,6 +415,10 @@ public class InCallPresenter implements CallList.Listener, InCallPhoneListener {
         Log.i(this, "Phone switching state: " + oldState + " -> " + newState);
         mInCallState = newState;
 
+        if (newState.isIncoming() && mAccelerometerListener != null) {
+            mAccelerometerListener.enable(true);
+        }
+
         for (IncomingCallListener listener : mIncomingCallListeners) {
             listener.onIncomingCall(oldState, mInCallState, call);
         }
@@ -432,6 +448,23 @@ public class InCallPresenter implements CallList.Listener, InCallPhoneListener {
 
         if (isActivityStarted()) {
             mInCallActivity.dismissKeyguard(false);
+        }
+    }
+
+    @Override
+    public void onOrientationChanged(int orientation) {
+        // ignored
+    }
+
+    @Override
+    public void onDeviceFlipped(boolean faceDown) {
+        if (!faceDown) {
+            return;
+        }
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(mContext);
+        if (prefs.getBoolean("button_smart_mute", false)) {
+            getTelecomManager().silenceRinger();
         }
     }
 
@@ -781,6 +814,9 @@ public class InCallPresenter implements CallList.Listener, InCallPhoneListener {
         if (incomingCall != null) {
             TelecomAdapter.getInstance().answerCall(
                     incomingCall.getId(), VideoProfile.VideoState.AUDIO_ONLY);
+            if (mAccelerometerListener != null) {
+                mAccelerometerListener.enable(false);
+            }
             return true;
         }
 
@@ -1087,6 +1123,11 @@ public class InCallPresenter implements CallList.Listener, InCallPhoneListener {
             mWakeLock = null;
             mPowerManager = null;
 
+            if (mAccelerometerListener != null) {
+                mAccelerometerListener.enable(false);
+                mAccelerometerListener = null;
+            }
+
             mAudioModeProvider = null;
 
             if (mStatusBarNotifier != null) {
@@ -1311,6 +1352,18 @@ public class InCallPresenter implements CallList.Listener, InCallPhoneListener {
         return TextUtils.getLayoutDirectionFromLocale(Locale.getDefault()) ==
                 View.LAYOUT_DIRECTION_RTL;
     }
+
+    /**
+     * @return An instance of TelecomManager.
+     */
+    public TelecomManager getTelecomManager() {
+        if (mTelecomManager == null) {
+            mTelecomManager = (TelecomManager)
+                    mContext.getSystemService(Context.TELECOM_SERVICE);
+        }
+        return mTelecomManager;
+    }
+
 
     /**
      * Private constructor. Must use getInstance() to get this singleton.
